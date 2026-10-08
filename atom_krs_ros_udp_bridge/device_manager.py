@@ -7,7 +7,7 @@ import rclpy
 from rclpy.node import Node
 
 from std_msgs.msg import String
-from atom_krs_ros_udp_bridge_msg.msg import Module, Modules
+from atom_krs_ros_udp_bridge_msg.msg import Module, Modules, IrReceiver
 
 next_id = 0
 
@@ -46,7 +46,7 @@ class DeviceManager(Node):
 
                 # JSONではIDが数字になっていることを保証
                 self.state = ({
-                    str(mac): {"id": int(data["id"]), "addr": str(data["addr"]), "last_seen": time.time(), "online": False}
+                    str(mac): {"id": int(data["id"]), "addr": str(data["addr"]), "last_seen": time.time(), "online": False, "neighbor": {"u": [-1, 0.0], "r": [-1, 0.0], "f": [-1, 0.0]}}
                     for mac, data in devices.items()
                 })
                 if devices:
@@ -79,7 +79,7 @@ class DeviceManager(Node):
         # 新しいデバイス
         device_id = next_id
 
-        self.state[mac] = {"id": device_id, "addr": addr, "last_seen": time.time(), "online": True}
+        self.state[mac] = {"id": device_id, "addr": addr, "last_seen": time.time(), "online": True, "neighbor": {"u": [-1, 0.0], "r": [-1, 0.0], "f": [-1, 0.0]}}
 
         next_id += 1
         self.save_devices()
@@ -99,6 +99,12 @@ class DeviceManager(Node):
         self.state[mac]["online"] = True
 
 
+    def handleneighbor(self, mac, ch, address_n):
+        
+        face = ["u", "r", "f"]
+        self.state[mac]["neighbor"][face[ch]] = [address_n, time.time()]
+
+
     def publish_state(self):
         
         msg = Modules()
@@ -111,6 +117,12 @@ class DeviceManager(Node):
             module.addr = self.state[mac]["addr"]
             module.online = self.state[mac]["online"]
             module.last_seen = self.state[mac]["last_seen"]
+            for face in self.state[mac]["neighbor"].keys():
+                receiver = IrReceiver()
+                receiver.face = face
+                receiver.address = self.state[mac]["neighbor"][face][0]
+                receiver.t = self.state[mac]["neighbor"][face][1]
+                module.receivers.append(receiver)
             msg.modules.append(module)
         
         msg.t = time.time()
@@ -203,6 +215,17 @@ class DeviceManager(Node):
                     )
                     
                     self.heartbeat(mac)
+                    
+                elif command == "NEIGHBOR":
+                    
+                    device_id = self.get_device_id(mac, addr[0])
+                    
+                    ch = int(parts[2])
+                    address_n = int(parts[3])
+                    
+                    # print(f"NEIGHBOR({mac}, {ch}, {address_n})")
+                    self.handleneighbor(mac, ch, address_n)
+                    
                 
             except BlockingIOError:
                 pass
