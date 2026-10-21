@@ -15,7 +15,7 @@ setup(
     zip_safe=True,
     maintainer='obamanarito',
     maintainer_email='obama1632@gmail.com',
-    description='TODO: Package description',
+    description='UDP bridge between mocube AtomS3 modules and ROS 2',
     license='Apache-2.0',
     extras_require={
         'test': [
@@ -24,9 +24,7 @@ setup(
     },
     entry_points={
         'console_scripts': [
-            'talker = atom_krs_ros_udp_bridge.minimal_publisher:main',
-            'listener = atom_krs_ros_udp_bridge.minimal_subscriber:main',
-            'device_manager = atom_krs_ros_udp_bridge.device_manager:main'
+            'device_manager = atom_krs_ros_udp_bridge.device_manager:main',
         ],
     },
 )
