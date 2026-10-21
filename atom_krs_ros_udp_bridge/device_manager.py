@@ -1,249 +1,172 @@
-import os
-import json
+"""
+device_manager ノード.
+
+UDP でモジュール (AtomS3) からの REGISTER / HEARTBEAT / NEIGHBOR を受け、
+ID の払い出しと応答を行い、全モジュールの状態を /modules に publish する。
+
+新しいモジュール -> PC コマンドを追加するときは
+  1. protocol.py の Command に名前、必要ならパーサを追加
+  2. DeviceManager に _on_<command>(packet, addr) を作り self._handlers に登録
+"""
+
 import socket
 import time
 
+from atom_krs_ros_udp_bridge.device_registry import DeviceRegistry
+from atom_krs_ros_udp_bridge.protocol import (
+    Command,
+    DEFAULT_PORT,
+    FACES,
+    format_ack_reply,
+    format_id_reply,
+    MAX_PACKET_SIZE,
+    parse_neighbor_args,
+    parse_packet,
+    ProtocolError,
+)
+from atom_krs_ros_udp_bridge_msg.msg import IrReceiver, Module, Modules
 import rclpy
+from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 
-from std_msgs.msg import String
-from atom_krs_ros_udp_bridge_msg.msg import Module, Modules, IrReceiver
-
-next_id = 0
+# 1 回のタイマーで処理する最大パケット数 (受信が多すぎてもタイマーが詰まらないように)
+MAX_PACKETS_PER_TICK = 100
 
 
-PORT = 5000
-
-# Heartbeatがこの秒数来なければOFFLINE
-TIMEOUT = 3.0
-
-# MAC -> ID の保存ファイル
-DEVICE_FILE = "devices.json"
+def to_modules_msg(devices, stamp):
+    """Device の一覧を Modules メッセージにする."""
+    msg = Modules()
+    msg.t = stamp
+    for device in devices:
+        module = Module()
+        module.id = int(device.id)
+        module.mac = device.mac
+        module.addr = device.addr
+        module.online = device.online
+        module.last_seen = float(device.last_seen)
+        for face in FACES:
+            address, t = device.neighbors[face]
+            receiver = IrReceiver()
+            receiver.face = face
+            receiver.address = int(address)
+            receiver.t = float(t)
+            module.receivers.append(receiver)
+        msg.modules.append(module)
+    return msg
 
 
 class DeviceManager(Node):
-    
-    
+
     def __init__(self):
         super().__init__('device_manager')
-        self.publisher_ = self.create_publisher(Modules, 'modules', 10)
-        timer_period = 0.01
-        self.timer = self.create_timer(timer_period, self.timer_callback_func())
-        self.state = {}
-        self.load_from_json()
-        return
 
+        port = self.declare_parameter('port', DEFAULT_PORT).value
+        # 相対パスは「ros2 run を実行したカレントディレクトリ」基準
+        device_file = self.declare_parameter('device_file', 'devices.json').value
+        timeout = self.declare_parameter('timeout', 3.0).value
+        publish_period = self.declare_parameter('publish_period', 0.01).value
 
-    def load_from_json(self):
-        
-        global next_id
-        
-        if os.path.exists(DEVICE_FILE):
+        self._registry = DeviceRegistry(device_file, timeout)
+        count = self._registry.load()
+        self.get_logger().info(f'Loaded {count} devices from {device_file}')
 
-            try:
-                with open(DEVICE_FILE, "r") as f:
-                    devices = json.load(f)
+        self._sock = self._open_socket(port)
+        self.get_logger().info(f'AtomS3 server started (UDP port {port})')
 
-                # JSONではIDが数字になっていることを保証
-                self.state = ({
-                    str(mac): {"id": int(data["id"]), "addr": str(data["addr"]), "last_seen": time.time(), "online": False, "neighbor": {"u": [-1, 0.0], "r": [-1, 0.0], "f": [-1, 0.0]}}
-                    for mac, data in devices.items()
-                })
-                if devices:
-                    next_id = max([self.state[mac]["id"] for mac in self.state]) + 1
-                    print(f"nextid {next_id}")
-                print(f"Loaded {len(devices)} devices.")
+        self._handlers = {
+            Command.REGISTER: self._on_register,
+            Command.HEARTBEAT: self._on_heartbeat,
+            Command.NEIGHBOR: self._on_neighbor,
+        }
 
-            except Exception as e:
-                print(f"Could not load {DEVICE_FILE}: {e}")
-            
-            
-    def save_devices(self):
+        self._publisher = self.create_publisher(Modules, 'modules', 10)
+        self._timer = self.create_timer(publish_period, self._on_timer)
 
-        with open(DEVICE_FILE, "w") as f:
-            json.dump(
-                self.state,
-                f,
-                indent=4
-            )
-        
-        
-    def get_device_id(self, mac, addr):
-
-        global next_id
-        # 既に登録されている
-        if mac in self.state:
-            self.state[mac]["addr"] = addr
-            return self.state[mac]["id"]
-
-        # 新しいデバイス
-        device_id = next_id
-
-        self.state[mac] = {"id": device_id, "addr": addr, "last_seen": time.time(), "online": True, "neighbor": {"u": [-1, 0.0], "r": [-1, 0.0], "f": [-1, 0.0]}}
-
-        next_id += 1
-        self.save_devices()
-        print()
-        print("================================")
-        print(" New AtomS3 detected")
-        print(f" MAC : {mac}")
-        print(f" ID  : {device_id}")
-        print("================================")
-
-        return device_id
-
-
-    def heartbeat(self, mac):
-        
-        self.state[mac]["last_seen"] = time.time()
-        self.state[mac]["online"] = True
-
-
-    def handleneighbor(self, mac, ch, address_n):
-        
-        face = ["u", "r", "f"]
-        self.state[mac]["neighbor"][face[ch]] = [address_n, time.time()]
-
-
-    def publish_state(self):
-        
-        msg = Modules()
-        msg.modules = []
-        
-        for mac in self.state.keys():
-            module = Module()
-            module.id = int(self.state[mac]["id"])
-            module.mac = mac
-            module.addr = self.state[mac]["addr"]
-            module.online = self.state[mac]["online"]
-            module.last_seen = self.state[mac]["last_seen"]
-            for face in self.state[mac]["neighbor"].keys():
-                receiver = IrReceiver()
-                receiver.face = face
-                receiver.address = self.state[mac]["neighbor"][face][0]
-                receiver.t = self.state[mac]["neighbor"][face][1]
-                module.receivers.append(receiver)
-            msg.modules.append(module)
-        
-        msg.t = time.time()
-        self.publisher_.publish(msg)
-    
-    def update_state(self):
-        
-        for mac in self.state.keys():
-            if time.time() - self.state[mac]["last_seen"] > TIMEOUT:
-                self.state[mac]["online"] = False
-    
-
-    def timer_callback_func(self):
-        
-        sock = socket.socket(
-            socket.AF_INET,
-            socket.SOCK_DGRAM
-        )
-    
-        # UDP broadcastを許可
-        sock.setsockopt(
-            socket.SOL_SOCKET,
-            socket.SO_BROADCAST,
-            1
-        )
-    
-        # 全てのネットワークインターフェースで受信
-        sock.bind(
-            ("0.0.0.0", PORT)
-        )
-        
+    @staticmethod
+    def _open_socket(port):
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+        # 全てのネットワークインターフェースで受信 (ブロードキャストも届く)
+        sock.bind(('0.0.0.0', port))
         sock.setblocking(False)
-    
-        print(
-            f"AtomS3 server started "
-            f"(UDP port {PORT})"
-        )
-        
-        def f():
+        return sock
 
+    def destroy_node(self):
+        self._sock.close()
+        return super().destroy_node()
+
+    # ------------------------------------------------------------
+    # timer
+    # ------------------------------------------------------------
+
+    def _on_timer(self):
+        for _ in range(MAX_PACKETS_PER_TICK):
             try:
-                data, addr = sock.recvfrom(1024)
-
-                message = data.decode(
-                    "utf-8",
-                    errors="ignore"
-                ).strip()
-
-                parts = message.split(",")
-
-                if len(parts) < 2:
-                    return
-
-                command = parts[0]
-                mac = parts[1].upper()
-
-                # ------------------------------------------------
-                # REGISTER
-                # ------------------------------------------------
-
-                if command == "REGISTER":
-
-                    device_id = self.get_device_id(mac, addr[0])                    
-
-                    response = f"ID,{device_id}"
-
-                    sock.sendto(
-                        response.encode(),
-                        addr
-                    )
-
-                    print(
-                        f"REGISTER: ID={device_id}, "
-                        f"MAC={mac}, IP={addr[0]}"
-                    )
-
-                # ------------------------------------------------
-                # HEARTBEAT
-                # ------------------------------------------------
-
-                elif command == "HEARTBEAT":
-
-                    device_id = self.get_device_id(mac, addr[0])
-
-                    response = f"ACK,{device_id}"
-
-                    sock.sendto(
-                        response.encode(),
-                        addr
-                    )
-                    
-                    self.heartbeat(mac)
-                    
-                elif command == "NEIGHBOR":
-                    
-                    device_id = self.get_device_id(mac, addr[0])
-                    
-                    ch = int(parts[2])
-                    address_n = int(parts[3])
-                    
-                    # print(f"NEIGHBOR({mac}, {ch}, {address_n})")
-                    self.handleneighbor(mac, ch, address_n)
-                    
-                
+                data, addr = self._sock.recvfrom(MAX_PACKET_SIZE)
             except BlockingIOError:
-                pass
-            
-            self.update_state()
-            self.publish_state()
-                
-        return f
+                break
+            self._handle_datagram(data, addr)
+
+        self._registry.update_online()
+        self._publisher.publish(
+            to_modules_msg(self._registry.devices.values(), time.time()))
+
+    def _handle_datagram(self, data, addr):
+        packet = parse_packet(data)
+        if packet is None:
+            return
+
+        handler = self._handlers.get(packet.command)
+        if handler is None:
+            self.get_logger().debug(f'Unknown command from {addr[0]}: {data!r}')
+            return
+
+        try:
+            handler(packet, addr)
+        except ProtocolError as e:
+            self.get_logger().warning(f'Bad packet from {addr[0]}: {e}')
+
+    def _register(self, packet, addr):
+        device, is_new = self._registry.get_or_register(packet.mac, addr[0])
+        if is_new:
+            self.get_logger().info(
+                f'New AtomS3 detected: MAC={device.mac} ID={device.id}')
+        return device
+
+    # ------------------------------------------------------------
+    # command handlers
+    # ------------------------------------------------------------
+
+    def _on_register(self, packet, addr):
+        device = self._register(packet, addr)
+        self._sock.sendto(format_id_reply(device.id), addr)
+        self.get_logger().info(
+            f'REGISTER: ID={device.id}, MAC={device.mac}, IP={addr[0]}')
+
+    def _on_heartbeat(self, packet, addr):
+        device = self._register(packet, addr)
+        self._sock.sendto(format_ack_reply(device.id), addr)
+        self._registry.mark_heartbeat(device.mac)
+
+    def _on_neighbor(self, packet, addr):
+        face, address = parse_neighbor_args(packet.args)
+        device = self._register(packet, addr)
+        self._registry.set_neighbor(device.mac, face, address)
+
 
 def main(args=None):
     rclpy.init(args=args)
-    
+
     device_manager = DeviceManager()
-    
-    rclpy.spin(device_manager)
-    
-    device_manager.destroy_node()
-    rclpy.shutdown()
-    
-if __name__=='__main__':
+
+    try:
+        rclpy.spin(device_manager)
+    except (KeyboardInterrupt, ExternalShutdownException):
+        pass
+    finally:
+        device_manager.destroy_node()
+        rclpy.try_shutdown()
+
+
+if __name__ == '__main__':
     main()
