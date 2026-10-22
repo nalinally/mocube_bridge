@@ -9,7 +9,6 @@ mocube のモジュール (M5Stack AtomS3) と ROS 2 をつなぐ UDP ブリッ�
 ## 使い方
 
 ```bash
-cd ~/git/mocube_ws    # 台帳 devices.json はカレントディレクトリに作られる
 ros2 run atom_krs_ros_udp_bridge device_manager
 ros2 run atom_krs_ros_udp_bridge device_manager --ros-args -p device_file:=/abs/path/devices.json
 ```
@@ -19,7 +18,7 @@ ros2 run atom_krs_ros_udp_bridge device_manager --ros-args -p device_file:=/abs/
 | 名前 | 既定値 | 説明 |
 |---|---|---|
 | `port` | `5000` | 受信する UDP ポート。ファームの `Config.h` の `UDP_PORT` と合わせる |
-| `device_file` | `devices.json` | MAC -> ID の台帳。**相対パスは ros2 run したカレントディレクトリ基準** |
+| `device_file` | `~/.ros/mocube/devices.json` | MAC -> ID の台帳。`~` は展開する。相対パスは ros2 run したカレントディレクトリ基準。起動時に `Loaded N devices from <絶対パス>` と出る |
 | `timeout` | `3.0` | この秒数 HEARTBEAT が無いと offline |
 | `publish_period` | `0.01` | 受信処理と `/modules` publish の周期 [s] |
 
@@ -97,7 +96,7 @@ test/
 ```
 
 ID を振り直したいときはノードを止めてから手で編集します (`id` と `addr` は必須、他は省略可)。
-ID を変えたモジュールはリセットして ID を取り直させてください。
+ID を変えたモジュールは、次の HEARTBEAT への `ACK,<新ID>` で自動的に新しい ID に切り替わります (リセット不要)。
 
 ## テスト
 
@@ -124,11 +123,11 @@ ros2 topic echo --once /modules
 |---|---|
 | `OSError: [Errno 98] Address already in use` で起動失敗 | 別の device_manager (や他のプロセス) が同じ `port` を使っている。`ss -ulpn \| grep 5000` |
 | `json.decoder.JSONDecodeError` / `KeyError: 'addr'` で起動失敗 | `device_file` が壊れている / 必須キーが無い。空の台帳で起動すると既存モジュールと ID が衝突するので、わざと落としている |
-| `Loaded 0 devices` なのに既存モジュールがある | カレントディレクトリが違い、別の (または存在しない) `devices.json` を見ている |
+| `Loaded 0 devices` なのに既存モジュールがある | ログのパスを確認。`device_file` で別の (または存在しない) 台帳を指定している |
 | ログに何も出ない (REGISTER が来ない) | パケットが届いていない。`sudo tcpdump -i any -n udp port 5000`。同じサブネットか、FW、WSL2 なら mirrored モード |
 | `Bad packet from ...: NEIGHBOR ...` | ファームと PC でプロトコルがずれている (ch が 0..2 外、引数不足) |
 | online が勝手に false になる | HEARTBEAT が `timeout` 秒来ていない。Wi-Fi の取りこぼし、モジュールのループ停止 (サーボ応答待ちなど) |
-| モジュールの PC ランプが赤のまま (ID は表示) | 台帳上の ID とモジュールが持つ ID が違う (台帳を消した/別の台帳で起動した)。モジュールをリセット |
+| モジュールの ID が勝手に変わった | 台帳上の ID とモジュールが持っていた ID が違ったので、ACK で PC 側に合わせた (台帳を消した/別の台帳で起動した)。モジュールのシリアルに `ID changed by ACK` が出る |
 | `/modules` の `addr` が古い | `addr` は最後にパケットを受けた送信元。DHCP で変わっても次のパケットで更新される |
 
 ログ出力は `rclpy` のロガー (`[device_manager]`)。未知コマンドのログは debug レベルなので、
