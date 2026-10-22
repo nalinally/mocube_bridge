@@ -25,6 +25,7 @@ setup(
     entry_points={
         'console_scripts': [
             'device_manager = mocube_bridge.device_manager:main',
+            'servo_teleop = mocube_bridge.servo_teleop:main',
         ],
     },
 )

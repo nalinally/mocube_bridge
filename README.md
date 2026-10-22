@@ -3,6 +3,7 @@
 mocube のモジュール (M5Stack AtomS3) と ROS 2 をつなぐ UDP ブリッジです。
 `device_manager` ノードがモジュールからの UDP を受けて ID を払い出し、全モジュールの状態を `/modules` に publish します。
 `/servo_commands` を受けると、中身を検査して指定されたモジュールに KRS サーボの指令を UDP で送ります。
+`servo_teleop` ノードを使うと、端末のキー操作でサーボを手動で動かせます (角度モード / 回転モード)。
 
 メッセージ定義は [mocube_msgs](https://github.com/nalinally/mocube_msgs)、
 通信プロトコルの一覧は mocube_ws の README にあります。
@@ -30,16 +31,57 @@ ros2 run mocube_bridge device_manager --ros-args -p device_file:=/abs/path/devic
 | `/modules` (publish) | `mocube_msgs/Modules` | `publish_period` ごと (既定 100 Hz)。変化が無くても流れる |
 | `/servo_commands` (subscribe) | `mocube_msgs/ServoCommands` | 受けたらすぐ、各指令を `KRS,...` にしてモジュールへ送る |
 
+## servo_teleop (サーボの手動操作)
+
+```bash
+ros2 run mocube_bridge servo_teleop                            # 全サーボ角度モードで開始
+ros2 run mocube_bridge servo_teleop --ros-args -p rotation:=true  # 全サーボ回転モードで開始
+```
+
+device_manager を起動しておきます。端末 (curses) に `/modules` のモジュール一覧と各サーボの状態が表として出て、
+キーを押すたびに `/servo_commands` に指令を publish します。
+
+送る値はどちらのモードも角度 [deg] (-135..135) です。回転モード (サーボの EEPROM で設定) のサーボは
+この値を「速さと向き」として扱い、**0 で停止**、0 から離れるほど速く回ります。
+teleop 上のモードは表示と停止操作のためのもので、サーボ自体のモードは切り替わりません
+(サーボ側の設定と合わせて使う)。
+
+| キー | 動作 |
+|---|---|
+| ↑ / ↓ (`k` / `j`) | モジュールを選ぶ |
+| ← / → (`h` / `l`) | サーボ (0..5) を選ぶ |
+| `m` | 選択中のサーボの 角度モード / 回転モード を切り替える (指令は送らない) |
+| `d` / `a` (`+` / `-`) | 選択中のサーボを step だけ動かす。回転モードなら速さを変える (-135..135 に丸める) |
+| `]` / `[` | step を 1 / 5 / 10 / 30 deg で切り替える (既定 5) |
+| Space / `c` | 0 を送る (角度モード: 中央へ / 回転モード: 停止) |
+| `s` | 選択中のモジュールの回転モードのサーボを全部止める |
+| `f` | 選択中のサーボを脱力 |
+| `F` | 選択中のモジュールの全サーボを脱力 |
+| `q` / Esc / Ctrl+C | 終了。回転中のサーボには 0 を送って止める (角度モードのサーボはそのまま) |
+
+表の見方: `+10` = 角度モードで +10 deg、`r+10` = 回転モードで速さ +10、`r0` = 停止、`F` / `rF` = 脱力。
+
+- 表の値は「servo_teleop が最後に送った指令」。サーボから読み返した値ではない
+- 起動直後は全サーボ脱力扱い。脱力中のサーボを `a` / `d` で動かすと **0 を基準に** 動き出すので、
+  角度モードではサーボの実際の角度が中央から離れていると一気に動く
+- キーを押しっぱなしにすると端末のキーリピートの速さで指令が飛ぶ。端末ではキーを離したことが分からないので、
+  回転は「押している間だけ回る」ではなく、止めるまで回り続ける
+- servo_teleop を `kill` した場合や device_manager が先に止まった場合は停止指令が届かない。止まらなければ `F`
+- 範囲の定数は `protocol.py` の `SERVO_*` (device_manager と同じ)
+
 ## ファイル構成
 
 ```
 mocube_bridge/
 ├── protocol.py         # パケットの分解・応答/KRS 指令の組み立て (ROS 非依存)
 ├── device_registry.py  # MAC -> Device の台帳, ID 払い出し, 永続化, タイムアウト (ROS 非依存)
-└── device_manager.py   # ROS ノード: UDP ソケット, コマンド振り分け, /modules への変換, /servo_commands の転送
+├── device_manager.py   # ROS ノード: UDP ソケット, コマンド振り分け, /modules への変換, /servo_commands の転送
+├── teleop_state.py     # servo_teleop のカーソル、角度/回転モード、送った指令の管理 (ROS 非依存)
+└── servo_teleop.py     # ROS ノード: curses の画面とキー操作 -> /servo_commands
 test/
 ├── test_protocol.py
 ├── test_device_registry.py
+├── test_teleop_state.py
 └── test_flake8.py / test_pep257.py / test_copyright.py (ament 標準)
 ```
 
@@ -125,7 +167,7 @@ colcon build --packages-select mocube_bridge
 colcon test --packages-select mocube_bridge && colcon test-result --verbose
 ```
 
-`protocol.py` と `device_registry.py` は ROS 無しで単体テストできます (時計は `clock` 引数で差し替え)。
+`protocol.py` と `device_registry.py`、`teleop_state.py` は ROS 無しで単体テストできます (時計は `clock` 引数で差し替え)。
 
 実機無しで動作を見るには、ノードを起動して別ターミナルから疑似パケットを送ります:
 
