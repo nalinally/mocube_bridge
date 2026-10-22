@@ -130,3 +130,10 @@ class DeviceRegistry:
         for device in self.devices.values():
             if now - device.last_seen > self.timeout:
                 device.online = False
+
+    def find_by_id(self, device_id):
+        """ID に対応する Device を返す. 無ければ None."""
+        for device in self.devices.values():
+            if device.id == device_id:
+                return device
+        return None
