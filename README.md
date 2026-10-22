@@ -79,7 +79,8 @@ test/
 - 保存: **新規登録したときだけ** `device_file` に JSON で書く。HEARTBEAT ごとには書かない
 - 読み込み: 使うのは `id` と `addr` だけ。全台 offline、`last_seen` = 起動時刻、隣接は未受信 (-1) から始まる
 - `online`: HEARTBEAT を受けたら true、`now - last_seen > timeout` で false
-- `neighbors`: NEIGHBOR で上書きされるだけで、**時間が経っても消えない**
+- `neighbors`: NEIGHBOR で上書きされるだけで、**時間が経っても消えない**。意図した仕様で、
+  古い情報を無視する判断は `/modules` を読む側 (接続状態を推定するノードを別に作る予定) で `t` を見て行う
 
 ### devices.json の形式
 
