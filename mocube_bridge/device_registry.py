@@ -11,7 +11,7 @@ import json
 import os
 import time
 
-from atom_krs_ros_udp_bridge.protocol import FACES
+from mocube_bridge.protocol import FACES
 
 # 隣接情報の address の初期値 (まだ何も受信していない)
 NO_NEIGHBOR = -1

@@ -1,6 +1,6 @@
 import json
 
-from atom_krs_ros_udp_bridge.device_registry import DeviceRegistry, NO_NEIGHBOR
+from mocube_bridge.device_registry import DeviceRegistry, NO_NEIGHBOR
 import pytest
 
 

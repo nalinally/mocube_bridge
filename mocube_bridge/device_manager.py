@@ -13,8 +13,8 @@ import os
 import socket
 import time
 
-from atom_krs_ros_udp_bridge.device_registry import DeviceRegistry
-from atom_krs_ros_udp_bridge.protocol import (
+from mocube_bridge.device_registry import DeviceRegistry
+from mocube_bridge.protocol import (
     Command,
     DEFAULT_PORT,
     FACES,
@@ -25,7 +25,7 @@ from atom_krs_ros_udp_bridge.protocol import (
     parse_packet,
     ProtocolError,
 )
-from atom_krs_ros_udp_bridge_msg.msg import IrReceiver, Module, Modules
+from mocube_msgs.msg import IrReceiver, Module, Modules
 import rclpy
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node

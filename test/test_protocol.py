@@ -1,4 +1,4 @@
-from atom_krs_ros_udp_bridge.protocol import (
+from mocube_bridge.protocol import (
     format_ack_reply,
     format_id_reply,
     parse_neighbor_args,

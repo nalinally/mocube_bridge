@@ -1,16 +1,16 @@
-# atom_krs_ros_udp_bridge
+# mocube_bridge
 
 mocube のモジュール (M5Stack AtomS3) と ROS 2 をつなぐ UDP ブリッジです。
 `device_manager` ノードがモジュールからの UDP を受けて ID を払い出し、全モジュールの状態を `/modules` に publish します。
 
-メッセージ定義は [atom_krs_ros_udp_bridge_msg](https://github.com/nalinally/atom_krs_ros_udp_bridge_msg)、
+メッセージ定義は [mocube_msgs](https://github.com/nalinally/mocube_msgs)、
 通信プロトコルの一覧は mocube_ws の README にあります。
 
 ## 使い方
 
 ```bash
-ros2 run atom_krs_ros_udp_bridge device_manager
-ros2 run atom_krs_ros_udp_bridge device_manager --ros-args -p device_file:=/abs/path/devices.json
+ros2 run mocube_bridge device_manager
+ros2 run mocube_bridge device_manager --ros-args -p device_file:=/abs/path/devices.json
 ```
 
 ### パラメータ
@@ -26,12 +26,12 @@ ros2 run atom_krs_ros_udp_bridge device_manager --ros-args -p device_file:=/abs/
 
 | トピック | 型 | 周期 |
 |---|---|---|
-| `/modules` (publish) | `atom_krs_ros_udp_bridge_msg/Modules` | `publish_period` ごと (既定 100 Hz)。変化が無くても流れる |
+| `/modules` (publish) | `mocube_msgs/Modules` | `publish_period` ごと (既定 100 Hz)。変化が無くても流れる |
 
 ## ファイル構成
 
 ```
-atom_krs_ros_udp_bridge/
+mocube_bridge/
 ├── protocol.py         # パケットの分解・応答の組み立て (ROS 非依存)
 ├── device_registry.py  # MAC -> Device の台帳, ID 払い出し, 永続化, タイムアウト (ROS 非依存)
 └── device_manager.py   # ROS ノード: UDP ソケット, コマンド振り分け, /modules への変換
@@ -102,8 +102,8 @@ ID を変えたモジュールは、次の HEARTBEAT への `ACK,<新ID>` で自
 ## テスト
 
 ```bash
-colcon build --packages-select atom_krs_ros_udp_bridge
-colcon test --packages-select atom_krs_ros_udp_bridge && colcon test-result --verbose
+colcon build --packages-select mocube_bridge
+colcon test --packages-select mocube_bridge && colcon test-result --verbose
 ```
 
 `protocol.py` と `device_registry.py` は ROS 無しで単体テストできます (時計は `clock` 引数で差し替え)。

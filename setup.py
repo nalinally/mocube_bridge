@@ -1,6 +1,6 @@
 from setuptools import find_packages, setup
 
-package_name = 'atom_krs_ros_udp_bridge'
+package_name = 'mocube_bridge'
 
 setup(
     name=package_name,
@@ -24,7 +24,7 @@ setup(
     },
     entry_points={
         'console_scripts': [
-            'device_manager = atom_krs_ros_udp_bridge.device_manager:main',
+            'device_manager = mocube_bridge.device_manager:main',
         ],
     },
 )
