@@ -3,10 +3,17 @@ device_manager ノード.
 
 UDP でモジュール (AtomS3) からの REGISTER / HEARTBEAT / NEIGHBOR を受け、
 ID の払い出しと応答を行い、全モジュールの状態を /modules に publish する。
+/servo_commands を受けると、指定されたモジュールに KRS パケットを送る。
 
 新しいモジュール -> PC コマンドを追加するときは
   1. protocol.py の Command に名前、必要ならパーサを追加
   2. DeviceManager に _on_<command>(packet, addr) を作り self._handlers に登録
+
+ROS から PC -> モジュールのコマンドを送れるようにするときは
+  1. mocube_msgs に module_id を持つ型付きのメッセージを作る (ファームの文字列は ROS に出さない)
+  2. protocol.py に format_xxx() を作り、引数の検査もそこで行う (範囲外は ProtocolError)
+  3. メッセージ -> パケットの変換関数 (to_servo_packet など) を作り、
+     subscription のコールバックから self._send_to_module() で送る
 """
 
 import os
@@ -20,12 +27,15 @@ from mocube_bridge.protocol import (
     FACES,
     format_ack_reply,
     format_id_reply,
+    format_servo_free,
+    format_servo_free_all,
+    format_servo_position,
     MAX_PACKET_SIZE,
     parse_neighbor_args,
     parse_packet,
     ProtocolError,
 )
-from mocube_msgs.msg import IrReceiver, Module, Modules
+from mocube_msgs.msg import IrReceiver, Module, Modules, ServoCommand, ServoCommands
 import rclpy
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
@@ -59,6 +69,17 @@ def to_modules_msg(devices, stamp):
     return msg
 
 
+def to_servo_packet(command):
+    """1 つの ServoCommand を KRS パケットにする. 中身が不正なら ProtocolError."""
+    if command.mode == ServoCommand.POSITION:
+        return format_servo_position(command.servo, command.position)
+    if command.mode == ServoCommand.FREE:
+        if command.servo == ServoCommand.ALL_SERVOS:
+            return format_servo_free_all()
+        return format_servo_free(command.servo)
+    raise ProtocolError(f'unknown servo mode: {command.mode}')
+
+
 class DeviceManager(Node):
 
     def __init__(self):
@@ -75,6 +96,7 @@ class DeviceManager(Node):
         count = self._registry.load()
         self.get_logger().info(f'Loaded {count} devices from {device_file}')
 
+        self._port = port
         self._sock = self._open_socket(port)
         self.get_logger().info(f'AtomS3 server started (UDP port {port})')
 
@@ -84,6 +106,8 @@ class DeviceManager(Node):
             Command.NEIGHBOR: self._on_neighbor,
         }
 
+        self._servo_subscription = self.create_subscription(
+            ServoCommands, 'servo_commands', self._on_servo_commands, 10)
         self._publisher = self.create_publisher(Modules, 'modules', 10)
         self._timer = self.create_timer(publish_period, self._on_timer)
 
@@ -157,6 +181,29 @@ class DeviceManager(Node):
         face, address = parse_neighbor_args(packet.args)
         device = self._register(packet, addr)
         self._registry.set_neighbor(device.mac, face, address)
+
+    # ------------------------------------------------------------
+    # subscription
+    # ------------------------------------------------------------
+
+    def _on_servo_commands(self, msg):
+        for command in msg.commands:
+            try:
+                packet = to_servo_packet(command)
+            except ProtocolError as e:
+                self.get_logger().warning(
+                    f'Bad servo command to module ID={command.module_id}: {e}')
+                continue
+            self._send_to_module(command.module_id, packet)
+
+    def _send_to_module(self, module_id, data):
+        """ID のモジュールに送る. 台帳に無ければ warning を出して捨てる."""
+        device = self._registry.find_by_id(module_id)
+        if device is None:
+            self.get_logger().warning(f'Unknown module ID={module_id}')
+            return
+        # モジュールは port で待っている (REGISTER の送信元ポートと同じ)
+        self._sock.sendto(data, (device.addr, self._port))
 
 
 def main(args=None):

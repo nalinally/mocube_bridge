@@ -2,6 +2,7 @@
 
 mocube のモジュール (M5Stack AtomS3) と ROS 2 をつなぐ UDP ブリッジです。
 `device_manager` ノードがモジュールからの UDP を受けて ID を払い出し、全モジュールの状態を `/modules` に publish します。
+`/servo_commands` を受けると、中身を検査して指定されたモジュールに KRS サーボの指令を UDP で送ります。
 
 メッセージ定義は [mocube_msgs](https://github.com/nalinally/mocube_msgs)、
 通信プロトコルの一覧は mocube_ws の README にあります。
@@ -27,14 +28,15 @@ ros2 run mocube_bridge device_manager --ros-args -p device_file:=/abs/path/devic
 | トピック | 型 | 周期 |
 |---|---|---|
 | `/modules` (publish) | `mocube_msgs/Modules` | `publish_period` ごと (既定 100 Hz)。変化が無くても流れる |
+| `/servo_commands` (subscribe) | `mocube_msgs/ServoCommands` | 受けたらすぐ、各指令を `KRS,...` にしてモジュールへ送る |
 
 ## ファイル構成
 
 ```
 mocube_bridge/
-├── protocol.py         # パケットの分解・応答の組み立て (ROS 非依存)
+├── protocol.py         # パケットの分解・応答/KRS 指令の組み立て (ROS 非依存)
 ├── device_registry.py  # MAC -> Device の台帳, ID 払い出し, 永続化, タイムアウト (ROS 非依存)
-└── device_manager.py   # ROS ノード: UDP ソケット, コマンド振り分け, /modules への変換
+└── device_manager.py   # ROS ノード: UDP ソケット, コマンド振り分け, /modules への変換, /servo_commands の転送
 test/
 ├── test_protocol.py
 ├── test_device_registry.py
@@ -48,7 +50,7 @@ test/
 1. パラメータ読み込み
 2. `DeviceRegistry.load()` — 台帳ファイルを読む。ファイルが無ければ空で開始、**壊れていたら例外で起動失敗**
 3. UDP ソケットを `0.0.0.0:<port>` に bind (SO_BROADCAST, ノンブロッキング)
-4. `publish_period` のタイマーを作る
+4. `/servo_commands` の subscription と `publish_period` のタイマーを作る
 
 タイマー (`_on_timer`) ごとに:
 
@@ -98,6 +100,23 @@ test/
 
 ID を振り直したいときはノードを止めてから手で編集します (`id` と `addr` は必須、他は省略可)。
 ID を変えたモジュールは、次の HEARTBEAT への `ACK,<新ID>` で自動的に新しい ID に切り替わります (リセット不要)。
+
+`/servo_commands` を受けたとき (`_on_servo_commands`)、`commands` を先頭から順に:
+
+1. `to_servo_packet()` でパケットにする
+
+   | `mode` | `servo` | パケット |
+   |---|---|---|
+   | `POSITION` | 0..5 | `KRS,setPos,<servo>,<position>` (`position` は 3500..11500) |
+   | `FREE` | 0..5 | `KRS,setFree,<servo>` |
+   | `FREE` | `ALL_SERVOS` (-1) | `KRS,setFreeAll` |
+
+   範囲外や未知の `mode` は `ProtocolError` になり、warning ログを出してその指令だけ捨てる
+2. `_send_to_module()` — `registry.find_by_id()` でモジュールを引き、`(device.addr, port)` に送る。
+   台帳に無い ID は warning ログを出して捨てる
+
+- 送り先は台帳の `addr` (最後にパケットを受けた IP) なので、offline のモジュールにも送る (届くかは分からない)
+- 範囲の定数 (`SERVO_COUNT` など) は `protocol.py`。ファームの `Config.h` を変えたらこちらも合わせる
 
 ## テスト
 
