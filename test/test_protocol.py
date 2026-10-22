@@ -1,9 +1,9 @@
 from mocube_bridge.protocol import (
     format_ack_reply,
     format_id_reply,
+    format_servo_angle,
     format_servo_free,
     format_servo_free_all,
-    format_servo_position,
     parse_neighbor_args,
     parse_packet,
     ProtocolError,
@@ -45,15 +45,18 @@ def test_replies():
 
 
 def test_format_servo():
-    assert format_servo_position(0, 7500) == b'KRS,setPos,0,7500'
+    assert format_servo_angle(0, 0.0) == b'KRS,setPos,0,0'
+    assert format_servo_angle(1, -12.5) == b'KRS,setPos,1,-12.5'
+    assert format_servo_angle(2, 135.0) == b'KRS,setPos,2,135'
     assert format_servo_free(5) == b'KRS,setFree,5'
     assert format_servo_free_all() == b'KRS,setFreeAll'
 
 
-@pytest.mark.parametrize('servo, position', [(-1, 7500), (6, 7500), (0, 3499), (0, 11501)])
-def test_format_servo_position_rejects_out_of_range(servo, position):
+@pytest.mark.parametrize(
+    'servo, angle', [(-1, 0.0), (6, 0.0), (0, -135.1), (0, 135.1), (0, float('nan'))])
+def test_format_servo_angle_rejects_out_of_range(servo, angle):
     with pytest.raises(ProtocolError):
-        format_servo_position(servo, position)
+        format_servo_angle(servo, angle)
 
 
 def test_format_servo_free_rejects_out_of_range():

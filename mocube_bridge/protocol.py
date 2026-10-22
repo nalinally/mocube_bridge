@@ -16,10 +16,9 @@ FACES = ('u', 'r', 'f')
 # 受信バッファサイズ (これより長いパケットは切り捨てられる)
 MAX_PACKET_SIZE = 1024
 
-# KRS サーボ。台数はファームの Config.h の KRS_SERVO_COUNT と合わせる
+# KRS サーボ。ファームの Config.h の KRS_SERVO_COUNT / KRS_MAX_DEG と合わせる
 SERVO_COUNT = 6
-SERVO_POSITION_MIN = 3500
-SERVO_POSITION_MAX = 11500
+SERVO_MAX_DEG = 135.0  # 角度 [deg] は -135..135。ICS のポジションへの変換はファームが行う
 
 
 class Command:
@@ -90,12 +89,12 @@ def _check_servo(servo: int):
         raise ProtocolError(f'servo out of range: {servo}')
 
 
-def format_servo_position(servo: int, position: int) -> bytes:
-    """サーボを位置指令する KRS パケット. 範囲外なら ProtocolError."""
+def format_servo_angle(servo: int, angle: float) -> bytes:
+    """サーボを角度 [deg] に指令する KRS パケット. 範囲外 (NaN も) なら ProtocolError."""
     _check_servo(servo)
-    if not SERVO_POSITION_MIN <= position <= SERVO_POSITION_MAX:
-        raise ProtocolError(f'servo position out of range: {position}')
-    return f'KRS,setPos,{servo},{position}'.encode()
+    if not -SERVO_MAX_DEG <= angle <= SERVO_MAX_DEG:
+        raise ProtocolError(f'servo angle out of range: {angle}')
+    return f'KRS,setPos,{servo},{angle:g}'.encode()
 
 
 def format_servo_free(servo: int) -> bytes:
