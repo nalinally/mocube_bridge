@@ -16,6 +16,11 @@ FACES = ('u', 'r', 'f')
 # 受信バッファサイズ (これより長いパケットは切り捨てられる)
 MAX_PACKET_SIZE = 1024
 
+# KRS サーボ。台数はファームの Config.h の KRS_SERVO_COUNT と合わせる
+SERVO_COUNT = 6
+SERVO_POSITION_MIN = 3500
+SERVO_POSITION_MAX = 11500
+
 
 class Command:
     """モジュール -> PC のコマンド名."""
@@ -78,3 +83,27 @@ def format_id_reply(device_id: int) -> bytes:
 def format_ack_reply(device_id: int) -> bytes:
     """HEARTBEAT への応答."""
     return f'ACK,{device_id}'.encode()
+
+
+def _check_servo(servo: int):
+    if not 0 <= servo < SERVO_COUNT:
+        raise ProtocolError(f'servo out of range: {servo}')
+
+
+def format_servo_position(servo: int, position: int) -> bytes:
+    """サーボを位置指令する KRS パケット. 範囲外なら ProtocolError."""
+    _check_servo(servo)
+    if not SERVO_POSITION_MIN <= position <= SERVO_POSITION_MAX:
+        raise ProtocolError(f'servo position out of range: {position}')
+    return f'KRS,setPos,{servo},{position}'.encode()
+
+
+def format_servo_free(servo: int) -> bytes:
+    """サーボを脱力する KRS パケット. 範囲外なら ProtocolError."""
+    _check_servo(servo)
+    return f'KRS,setFree,{servo}'.encode()
+
+
+def format_servo_free_all() -> bytes:
+    """全サーボを脱力する KRS パケット."""
+    return b'KRS,setFreeAll'

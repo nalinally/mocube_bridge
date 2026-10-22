@@ -1,6 +1,9 @@
 from mocube_bridge.protocol import (
     format_ack_reply,
     format_id_reply,
+    format_servo_free,
+    format_servo_free_all,
+    format_servo_position,
     parse_neighbor_args,
     parse_packet,
     ProtocolError,
@@ -39,3 +42,20 @@ def test_parse_neighbor_args_rejects_bad(args):
 def test_replies():
     assert format_id_reply(3) == b'ID,3'
     assert format_ack_reply(12) == b'ACK,12'
+
+
+def test_format_servo():
+    assert format_servo_position(0, 7500) == b'KRS,setPos,0,7500'
+    assert format_servo_free(5) == b'KRS,setFree,5'
+    assert format_servo_free_all() == b'KRS,setFreeAll'
+
+
+@pytest.mark.parametrize('servo, position', [(-1, 7500), (6, 7500), (0, 3499), (0, 11501)])
+def test_format_servo_position_rejects_out_of_range(servo, position):
+    with pytest.raises(ProtocolError):
+        format_servo_position(servo, position)
+
+
+def test_format_servo_free_rejects_out_of_range():
+    with pytest.raises(ProtocolError):
+        format_servo_free(6)
