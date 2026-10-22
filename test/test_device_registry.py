@@ -81,3 +81,12 @@ def test_set_neighbor(tmp_path, clock):
     registry.get_or_register('AA', '10.0.0.1')
     registry.set_neighbor('AA', 'r', 2)
     assert registry.devices['AA'].neighbors['r'] == [2, clock.now]
+
+
+def test_save_creates_parent_directory(tmp_path, clock):
+    path = tmp_path / 'nested' / 'dir' / 'devices.json'
+    registry = DeviceRegistry(str(path), timeout=3.0, clock=clock)
+
+    registry.get_or_register('AA', '10.0.0.1')
+
+    assert json.loads(path.read_text())['AA']['id'] == 0

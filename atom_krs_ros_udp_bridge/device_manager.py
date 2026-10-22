@@ -9,6 +9,7 @@ ID の払い出しと応答を行い、全モジュールの状態を /modules �
   2. DeviceManager に _on_<command>(packet, addr) を作り self._handlers に登録
 """
 
+import os
 import socket
 import time
 
@@ -28,6 +29,9 @@ from atom_krs_ros_udp_bridge_msg.msg import IrReceiver, Module, Modules
 import rclpy
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
+
+# 台帳の既定の場所。起動したディレクトリによって別の台帳を使わないよう絶対パスにする
+DEFAULT_DEVICE_FILE = '~/.ros/mocube/devices.json'
 
 # 1 回のタイマーで処理する最大パケット数 (受信が多すぎてもタイマーが詰まらないように)
 MAX_PACKETS_PER_TICK = 100
@@ -61,8 +65,9 @@ class DeviceManager(Node):
         super().__init__('device_manager')
 
         port = self.declare_parameter('port', DEFAULT_PORT).value
-        # 相対パスは「ros2 run を実行したカレントディレクトリ」基準
-        device_file = self.declare_parameter('device_file', 'devices.json').value
+        # ~ は展開する。相対パスは「ros2 run を実行したカレントディレクトリ」基準
+        device_file = os.path.abspath(os.path.expanduser(
+            self.declare_parameter('device_file', DEFAULT_DEVICE_FILE).value))
         timeout = self.declare_parameter('timeout', 3.0).value
         publish_period = self.declare_parameter('publish_period', 0.01).value
 

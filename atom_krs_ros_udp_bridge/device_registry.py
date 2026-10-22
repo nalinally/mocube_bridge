@@ -83,6 +83,9 @@ class DeviceRegistry:
         return len(self.devices)
 
     def save(self):
+        directory = os.path.dirname(self.path)
+        if directory:
+            os.makedirs(directory, exist_ok=True)
         with open(self.path, 'w') as f:
             json.dump(
                 {mac: d.to_json() for mac, d in self.devices.items()},
